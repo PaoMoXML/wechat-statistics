@@ -32,7 +32,9 @@ pub struct Conversation {
 
 /// 单条消息（message_*.db 的 Msg_<hash> 表）。
 /// 默认不载入正文内容，仅记录长度——统计骨架足够，且避免把大量隐私文本拉入内存。
+/// （Phase 2 按需读取单条消息时启用。）
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct Message {
     pub local_id: i64,
     /// 消息类型码（local_type 原始值）。统计时用 `schema::base_type()` 取基础类型：

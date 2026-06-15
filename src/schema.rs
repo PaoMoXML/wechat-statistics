@@ -130,11 +130,16 @@ pub fn verify_columns(conn: &Connection, table: &str, required: &[&str]) -> Resu
 /// 常见基础类型码（待 Phase 1 用真实样本进一步核对）：
 ///   1=文本, 3=图片, 34=语音, 42=名片, 43=视频, 47=表情贴纸,
 ///   48=位置, 49=文件/应用消息, 50=音视频通话, 10000=系统消息。
+///
+/// 注：统计引擎目前在 SQL 侧用 `& 4294967295` 直接掩码（更高效），
+/// 本函数作为单条消息解析时的工具保留。
+#[allow(dead_code)]
 pub fn base_type(local_type: i64) -> i64 {
     local_type & 0xFFFF_FFFF
 }
 
 /// 解析 `local_type` 的高位子类型。
+#[allow(dead_code)]
 pub fn sub_type(local_type: i64) -> i64 {
     (local_type >> 32) & 0xFFFF_FFFF
 }

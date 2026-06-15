@@ -3,7 +3,7 @@
 //! 所有读取都走 `schema.rs` 的列名映射并在运行时校验，确保版本兼容。
 //! 只读访问，绝不写入用户数据库。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
@@ -120,6 +120,44 @@ impl WeChatData {
             }
         }
         Ok(counts)
+    }
+
+    /// 按 db_stem 分组遍历所有会话的消息表，对每个 (连接, 会话) 调用一次 `f`。
+    /// 每个 message_*.db 只打开一次连接；BTreeMap 保证遍历顺序稳定（便于复现/日志）。
+    /// 单个表出错只打印警告并跳过，不中断整体统计——适合跨数千张表的聚合。
+    pub fn for_each_conversation<F>(&self, convs: &[Conversation], mut f: F) -> Result<()>
+    where
+        F: FnMut(&Connection, &Conversation) -> Result<()>,
+    {
+        // 过滤掉 db_stem / table_name 为空的退化行（真实 session 表里偶有出现），
+        // 它们无法定位消息表，干净跳过并汇总提示，而不是去打开 `.db` 制造噪音。
+        let mut by_db: BTreeMap<&str, Vec<&Conversation>> = BTreeMap::new();
+        let mut skipped = 0usize;
+        for c in convs {
+            if c.db_stem.is_empty() || c.table_name.is_empty() {
+                skipped += 1;
+                continue;
+            }
+            by_db.entry(c.db_stem.as_str()).or_default().push(c);
+        }
+        if skipped > 0 {
+            eprintln!("ℹ 跳过 {skipped} 个无法定位消息表的会话（db_stem/table_name 为空）");
+        }
+        for (stem, list) in by_db {
+            let conn = match self.db(stem) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("⚠ 跳过 {stem}.db（打开失败）: {e}");
+                    continue;
+                }
+            };
+            for c in list {
+                if let Err(e) = f(&conn, c) {
+                    eprintln!("⚠ 跳过表 {stem}.{}: {e}", c.table_name);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 对单个会话做聚合统计（纯 SQL，不读取正文内容）。
