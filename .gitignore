@@ -1,0 +1,8 @@
+/target
+
+# 隐私：探测/解析产物可能含个人微信内容，禁止提交
+probe.json
+wxid_*.json
+*.db
+*_selftest.db
+
