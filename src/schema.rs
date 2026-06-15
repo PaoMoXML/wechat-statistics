@@ -17,6 +17,9 @@ pub struct MessageCols {
     pub local_id: &'static str,
     pub local_type: &'static str,
     pub create_time: &'static str,
+    /// ⚠ 不是 contact.id！是「Name2Id」表的隐式 rowid 外键（每个 message_*.db 各有自己的 Name2Id，
+    /// rowid 跨库不同）。取真实 wxid 要 `LEFT JOIN Name2Id n ON real_sender_id = n.rowid`，
+    /// 取 n.user_name。判定「我发的」：该库的 self_rowid（见 loader::self_rowid_for）== real_sender_id。
     pub real_sender_id: &'static str,
     pub message_content: &'static str,
 }

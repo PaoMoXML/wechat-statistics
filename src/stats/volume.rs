@@ -18,27 +18,34 @@ pub struct VolumeStats {
     pub total_messages: i64,
     /// (基础类型码, 条数)，按条数降序。
     pub type_dist: Vec<(i64, i64)>,
-    /// (会话 username, 条数)，按条数降序，最多 `top_n` 条。
-    pub top: Vec<(String, i64)>,
+    /// (会话 username, 总条数, 我发的条数, 对方发的条数)，按总条数降序，最多 `top_n` 条。
+    pub top: Vec<(String, i64, i64, i64)>,
 }
 
-/// 在线累加器：遍历每张消息表时喂给它，最后 `finalize` 成统计结果。
+/// 在线累加器：遍历每张消息表（含一个会话的多个分片）时喂给它，最后 `finalize`。
 pub struct VolumeAccum {
     by_base_type: HashMap<i64, i64>,
-    per_conv: Vec<(String, i64)>,
+    /// username → (total, mine, theirs)。同一会话的多个分片按 username **合并**。
+    per_conv: HashMap<String, (i64, i64, i64)>,
     total: i64,
     top_n: usize,
 }
 
 impl VolumeAccum {
     pub fn new(top_n: usize) -> Self {
-        Self { by_base_type: HashMap::new(), per_conv: Vec::new(), total: 0, top_n }
+        Self { by_base_type: HashMap::new(), per_conv: HashMap::new(), total: 0, top_n }
     }
 
-    pub fn observe_table(&mut self, conn: &Connection, conv: &Conversation) -> Result<()> {
+    /// `self_rowid` 是该分片所在库的「我的 Name2Id.rowid」（per-DB）。
+    /// 一个跨多库分片的会话会触发多次本方法，结果按 username 合并。
+    pub fn observe_table(
+        &mut self,
+        conn: &Connection,
+        conv: &Conversation,
+        self_rowid: Option<i64>,
+    ) -> Result<()> {
         let m = MessageCols::V4;
         let tbl = quote_ident(&conv.table_name);
-        // 基础类型 = local_type & 0xFFFFFFFF。一次 GROUP BY 同时拿到类型分布与会话总数。
         let sql = format!(
             "SELECT ({lt} & 4294967295), count(*) FROM {tbl} GROUP BY 1",
             lt = m.local_type
@@ -51,16 +58,36 @@ impl VolumeAccum {
             *self.by_base_type.entry(base).or_insert(0) += n;
             conv_total += n;
         }
+
+        let (mine, theirs) = match self_rowid {
+            Some(sid) => {
+                let q = format!(
+                    "SELECT SUM({rs}={sid}), SUM({rs}<>{sid}) FROM {tbl}",
+                    rs = m.real_sender_id
+                );
+                let (mine, theirs): (Option<i64>, Option<i64>) =
+                    conn.query_row(&q, [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                (mine.unwrap_or(0), theirs.unwrap_or(0))
+            }
+            None => (0, conv_total),
+        };
+
         self.total += conv_total;
-        self.per_conv.push((conv.username.clone(), conv_total));
+        let e = self.per_conv.entry(conv.username.clone()).or_insert((0, 0, 0));
+        e.0 += conv_total;
+        e.1 += mine;
+        e.2 += theirs;
         Ok(())
     }
 
     pub fn finalize(self, conversations: usize) -> VolumeStats {
         let mut type_dist: Vec<_> = self.by_base_type.into_iter().collect();
-        // 条数降序；条数相同按类型码升序，输出稳定。
         type_dist.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-        let mut top = self.per_conv;
+        let mut top: Vec<(String, i64, i64, i64)> = self
+            .per_conv
+            .into_iter()
+            .map(|(u, (t, m, th))| (u, t, m, th))
+            .collect();
         top.sort_by(|a, b| b.1.cmp(&a.1));
         top.truncate(self.top_n);
         VolumeStats { conversations, total_messages: self.total, type_dist, top }
@@ -90,7 +117,7 @@ mod tests {
     fn conv() -> Conversation {
         Conversation {
             username: "wxid_test".into(),
-            db_stem: "message_0".into(),
+            db_stems: vec!["message_0".into()],
             table_name: "Msg_a".into(),
             msg_count: None,
         }
@@ -110,8 +137,9 @@ mod tests {
             [],
         )
         .unwrap();
+        // real_sender_id 全是 1 → self_rowid=1 时 mine=5 / theirs=0
         let mut a = VolumeAccum::new(10);
-        a.observe_table(&conn, &conv()).unwrap();
+        a.observe_table(&conn, &conv(), Some(1)).unwrap();
         let s = a.finalize(1);
         assert_eq!(s.total_messages, 5);
         let map: HashMap<i64, i64> = s.type_dist.into_iter().collect();
@@ -119,5 +147,7 @@ mod tests {
         assert_eq!(map[&3], 1);
         assert_eq!(map[&49], 2, "纯 49 + 打包 base 49 应合并为 2");
         assert_eq!(s.top[0].1, 5);
+        assert_eq!(s.top[0].2, 5, "self_id=1 时全部算我发的");
+        assert_eq!(s.top[0].3, 0);
     }
 }

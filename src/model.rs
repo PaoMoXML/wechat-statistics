@@ -17,14 +17,27 @@ pub struct Contact {
     pub is_chatroom: bool,
 }
 
+impl Contact {
+    /// 显示名：优先备注 → 昵称 → username（跳过空串）。
+    /// 用于把脱敏 wxid 换成可读名称。
+    pub fn display_name(&self) -> &str {
+        self.remark
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or_else(|| self.nickname.as_deref().filter(|s| !s.is_empty()))
+            .unwrap_or(&self.username)
+    }
+}
+
 /// 会话（session.db 的 session_last_message 表）→ 定位消息表。
 #[derive(Debug, Clone, Serialize)]
 pub struct Conversation {
     /// 会话标识：对方 wxid 或群 ID。
     pub username: String,
-    /// 消息所在库，如 `message_0`。
-    pub db_stem: String,
-    /// 对应的 `Msg_<hash>` 表名。
+    /// 该会话消息所在的所有库（一个会话可能被**按时间分片**到多个 message_*.db / biz_message_*.db，
+    /// 表名同为 `Msg_{md5(username)}`）。读取时必须遍历全部分片并合并。
+    pub db_stems: Vec<String>,
+    /// 对应的 `Msg_<hash>` 表名（= `Msg_{md5(username)}`，跨分片相同）。
     pub table_name: String,
     /// 消息条数（由 loader 填充）。
     pub msg_count: Option<i64>,
@@ -46,4 +59,27 @@ pub struct Message {
     pub sender_id: i64,
     /// 正文长度（字符），用于字数统计。
     pub content_len: i64,
+}
+
+/// 时序事实：单条消息用于时序分析的最小信息（不含正文）。
+/// 由 loader 按 `sort_seq` 顺序读出，供 dig 模块做回复时延 / 每日首发等序列计算。
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct MessageFact {
+    /// Unix 秒。
+    pub create_time: i64,
+    /// 发送者内部 ID（= Name2Id.rowid；自己的消息为该库的 self_rowid）。
+    pub sender_id: i64,
+    /// 基础类型码（local_type 已取低 32 位）。
+    pub base_type: i64,
+}
+
+/// 一条文本消息（仅 base_type=1，已解压、已去群前缀），用于字数 / 关键词 / 词频分析。
+#[derive(Debug, Clone, Serialize)]
+pub struct TextMessage {
+    /// Unix 秒。
+    pub create_time: i64,
+    /// 发送者 Name2Id.rowid（用于区分「我/对方」）。
+    pub sender_id: i64,
+    /// 解压后的正文（解码失败为 None）。
+    pub text: Option<String>,
 }

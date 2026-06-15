@@ -125,7 +125,7 @@ mod tests {
         .unwrap();
         let conv = Conversation {
             username: "x".into(),
-            db_stem: "m".into(),
+            db_stems: vec!["m".into()],
             table_name: "Msg_a".into(),
             msg_count: None,
         };
