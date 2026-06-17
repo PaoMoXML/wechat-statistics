@@ -1,0 +1,85 @@
+name: release
+
+# 打 `v*` tag 即触发：git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+# softprops/action-gh-release 需要写权限来创建 Release
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false        # 一个平台挂了不影响其它平台
+      matrix:
+        include:
+          # 微信 4.x 是 Windows 客户端 —— 这是主要产物
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # Linux（静态链接 musl，产物不依赖 glibc，任意发行版可直接跑）
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          # Apple Silicon（需要 Intel Mac 时再加一行 macos-13 + x86_64-apple-darwin）
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      # musl 交叉编译：装 musl 工具链，让 rusqlite/zstd 的 bundled C 源码用 musl-gcc 编译
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf ../../../wechat-statistics-${{ matrix.target }}.tar.gz wechat-statistics
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../wechat-statistics-${{ matrix.target }}.zip wechat-statistics.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wechat-statistics-${{ matrix.target }}
+          path: wechat-statistics-${{ matrix.target }}.*
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true     # 把各平台产物摊平到同一目录
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true   # 自动用 PR/commit 标题生成 changelog
+          files: artifacts/*
