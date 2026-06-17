@@ -381,22 +381,10 @@ fn render_value(v: ValueRef, max_chars: usize) -> String {
         ValueRef::Real(f) => format!("{f}"),
         ValueRef::Text(b) => {
             let s = String::from_utf8_lossy(b).to_string();
-            truncate_str(&s, max_chars)
+            crate::fmt::truncate(&s, max_chars)
         }
         ValueRef::Blob(b) => format!("<BLOB {} bytes>", b.len()),
     }
-}
-
-fn truncate_str(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        return s.to_string();
-    }
-    let end = s
-        .char_indices()
-        .nth(max_chars)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len());
-    format!("{}…", &s[..end])
 }
 
 /// 给标识符加双引号并转义，避免奇怪表名/列名导致 SQL 解析失败。

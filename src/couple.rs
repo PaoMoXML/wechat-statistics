@@ -3,7 +3,7 @@
 //! 时序叙事基于 loader 读出的 `MessageFact`（不读正文）；文本指标（字数/关键词/最长一条）
 //! 基于按需解压的 `TextMessage`。纯计算、可单测。
 
-use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 use serde::Serialize;
 
 use crate::model::{MessageFact, TextMessage};
@@ -86,7 +86,7 @@ pub fn compute(
     texts: Option<&[TextMessage]>,
 ) -> CoupleReport {
     let total = facts.len() as i64;
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
 
     // —— 按本地日期分桶（计数 + 首/末日）——
     let mut by_day: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
@@ -107,7 +107,7 @@ pub fn compute(
         if f.base_type == 50 {
             call_count += 1;
         }
-        let Some(dt) = to_local(f.create_time) else { continue };
+        let Some(dt) = crate::fmt::local_dt(f.create_time) else { continue };
         if dt.hour() <= LATE_NIGHT_MAX_HOUR {
             late_night += 1;
         }
@@ -186,7 +186,7 @@ const KEYWORDS: &[&str] = &[
 
 /// 文本指标：总字数（我/对方）、最长一条、关键词命中（消息条数，我/对方拆分）。
 fn compute_text(texts: &[TextMessage], self_rowid: Option<i64>) -> TextMetrics {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
 
     let mut my_chars = 0i64;
     let mut other_chars = 0i64;
@@ -291,7 +291,7 @@ fn streaks(by_day: &std::collections::BTreeMap<String, i64>) -> StreakInfo {
 /// 秒回率：遍历有序消息，发送者切换且 0<gap<=CAP 时记一次「回复」。
 /// 返回 (我秒回率, 对方秒回率, 我1分内率, 对方1分内率, 我回复数, 对方回复数)。
 fn quick_reply(facts: &[MessageFact], self_rowid: Option<i64>) -> (f64, f64, f64, f64, i64, i64) {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
 
     let mut my_quick = 0i64;
     let mut o_quick = 0i64;
@@ -325,7 +325,7 @@ fn quick_reply(facts: &[MessageFact], self_rowid: Option<i64>) -> (f64, f64, f64
         prev = Some((f.sender_id, f.create_time));
     }
 
-    let r = |x: i64, n: i64| if n > 0 { x as f64 / n as f64 } else { 0.0 };
+    let r = crate::fmt::ratio;
     (
         r(my_quick, my_total),
         r(o_quick, o_total),
@@ -334,10 +334,6 @@ fn quick_reply(facts: &[MessageFact], self_rowid: Option<i64>) -> (f64, f64, f64
         my_total,
         o_total,
     )
-}
-
-fn to_local(secs: i64) -> Option<DateTime<Local>> {
-    Local.timestamp_opt(secs, 0).single()
 }
 
 fn date_key(dt: &DateTime<Local>) -> String {

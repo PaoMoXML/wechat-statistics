@@ -11,7 +11,7 @@ pub fn couple_html(conv: &Conversation, name: &str, r: &CoupleReport, c: &crate:
     let css = format!("{}\n{}", BASE_CSS, DASHBOARD_CSS);
     let _ = conv; // 预留：将来可展示 username
     let total = r.total;
-    let my_pct = pct(r.my_count, total);
+    let my_pct = crate::fmt::pct(r.my_count, total);
     let other_pct = 100.0 - my_pct;
 
     let span = match (&r.first_day, &r.last_day) {
@@ -102,7 +102,7 @@ fn build_slides(name: &str, r: &CoupleReport, c: &crate::curios::Curios) -> Vec<
     ));
 
     // 5. 你来我往
-    let my_pct = pct(r.my_count, r.total);
+    let my_pct = crate::fmt::pct(r.my_count, r.total);
     let ratio = format!(
         "<div class=\"bar\"><span class=\"me\" style=\"width:{a:.1}%\"></span><span class=\"them\" style=\"width:{b:.1}%\"></span></div><div class=\"bar-legend\"><span>我 {c}</span><span>ta {d}</span></div>",
         a = my_pct, b = 100.0 - my_pct, c = fmt(r.my_count), d = fmt(r.other_count),
@@ -298,20 +298,20 @@ fn dig_html(r: &CoupleReport) -> String {
         match (s.median_sec, s.mean_sec) {
             (Some(md), Some(mn)) => format!(
                 "<span class=\"lat\"><b>中位 {}</b><i>均值 {}</i><u>{} 次回复</u></span>",
-                dur(md), dur(mn), fmt(s.samples),
+                crate::fmt::fmt_duration(md), crate::fmt::fmt_duration(mn), fmt(s.samples),
             ),
             _ => "<span class='muted'>无样本</span>".into(),
         }
     };
     let total_open = d.days_self_open + d.days_other_open;
-    let my_pct = pct(d.days_self_open, total_open);
+    let my_pct = crate::fmt::pct(d.days_self_open, total_open);
     let types = |dist: &[(i64, i64)], side: &str| -> String {
         if dist.is_empty() {
             return "<span class='muted'>—</span>".into();
         }
         dist.iter()
             .take(6)
-            .map(|(t, n)| format!("<span class=\"tc {side}\">{}<i>{}</i></span>", type_label(*t), fmt(*n)))
+            .map(|(t, n)| format!("<span class=\"tc {side}\">{}<i>{}</i></span>", crate::schema::type_label(*t), fmt(*n)))
             .collect::<Vec<_>>()
             .join("")
     };
@@ -564,25 +564,7 @@ fn biorhythm_svg(b: &crate::curios::Biorhythm) -> String {
     )
 }
 
-// —— 小工具 ——
-fn dur(secs: i64) -> String {
-    if secs < 60 {
-        format!("{}秒", secs)
-    } else if secs < 3600 {
-        format!("{}分{}秒", secs / 60, secs % 60)
-    } else {
-        format!("{}时{}分", secs / 3600, (secs % 3600) / 60)
-    }
-}
-fn type_label(t: i64) -> &'static str {
-    match t {
-        1 => "文本", 3 => "图片", 34 => "语音", 42 => "名片", 43 => "视频",
-        47 => "表情", 48 => "位置", 49 => "文件", 50 => "通话", 10000 => "系统", _ => "其他",
-    }
-}
-fn pct(part: i64, whole: i64) -> f64 {
-    if whole > 0 { 100.0 * part as f64 / whole as f64 } else { 0.0 }
-}
+// —— 小工具 ——（数字格式化保留本地 fmt；时长/类型名/百分比统一走 fmt、schema 模块）
 fn fmt(n: i64) -> String { format!("{}", n) }
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")

@@ -82,7 +82,7 @@ impl VolumeAccum {
 
     pub fn finalize(self, conversations: usize) -> VolumeStats {
         let mut type_dist: Vec<_> = self.by_base_type.into_iter().collect();
-        type_dist.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        crate::fmt::sort_by_value_desc(&mut type_dist);
         let mut top: Vec<(String, i64, i64, i64)> = self
             .per_conv
             .into_iter()

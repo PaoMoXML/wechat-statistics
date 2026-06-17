@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Datelike, Local, TimeZone};
+use chrono::Datelike;
 use serde::Serialize;
 
 use crate::model::MessageFact;
@@ -131,7 +131,7 @@ fn type_dist<F: Fn(i64) -> bool>(facts: &[MessageFact], is_bucket: F) -> Vec<(i6
         }
     }
     let mut v: Vec<_> = m.into_iter().collect();
-    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    crate::fmt::sort_by_value_desc(&mut v);
     v
 }
 
@@ -175,10 +175,10 @@ fn daily_openers(facts: &[MessageFact], self_id: Option<i64>) -> (i64, i64, Vec<
         if f.create_time <= 0 {
             continue;
         }
-        let Some(dt) = to_local(f.create_time) else { continue };
+        let Some(dt) = crate::fmt::local_dt(f.create_time) else { continue };
         let key = format!("{:04}-{:02}-{:02}", dt.year(), dt.month(), dt.day());
         by_day.entry(key).or_insert_with(|| {
-            let is_self = self_id.map_or(false, |s| f.sender_id == s);
+            let is_self = crate::model::is_self(self_id, f.sender_id);
             (is_self, f.create_time)
         });
     }
@@ -198,10 +198,6 @@ fn daily_openers(facts: &[MessageFact], self_id: Option<i64>) -> (i64, i64, Vec<
         .map(|(d, (is_self, t))| (d, is_self, t))
         .collect();
     (days_self, days_other, recent)
-}
-
-fn to_local(secs: i64) -> Option<DateTime<Local>> {
-    Local.timestamp_opt(secs, 0).single()
 }
 
 fn latency_stats(mut v: Vec<i64>) -> LatencyStats {

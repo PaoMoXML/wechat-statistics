@@ -5,4 +5,5 @@ probe.json
 wxid_*.json
 *.db
 *_selftest.db
+.html
 

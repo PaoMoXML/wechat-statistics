@@ -259,7 +259,7 @@ impl WeChatData {
             }
         }
         let mut type_dist: Vec<(i64, i64)> = td.into_iter().collect();
-        type_dist.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        crate::fmt::sort_by_value_desc(&mut type_dist);
         Ok(ConvStats { count, distinct_senders: senders, time_min: tmin, time_max: tmax, type_dist })
     }
 

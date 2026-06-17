@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 
 use crate::model::MessageFact;
@@ -52,7 +52,7 @@ pub fn heatmap(facts: &[MessageFact]) -> Heatmap {
         if f.create_time <= 0 {
             continue;
         }
-        if let Some(dt) = Local.timestamp_opt(f.create_time, 0).single() {
+        if let Some(dt) = crate::fmt::local_dt(f.create_time) {
             *by_day.entry(dt.date_naive()).or_insert(0) += 1;
         }
     }
@@ -112,7 +112,7 @@ fn series(facts: &[MessageFact], b: Bucket) -> TrendSeries {
         if f.create_time <= 0 {
             continue;
         }
-        let Some(dt) = Local.timestamp_opt(f.create_time, 0).single() else { continue };
+        let Some(dt) = crate::fmt::local_dt(f.create_time) else { continue };
         let d = dt.date_naive();
         let (ord, anchor) = match b {
             Bucket::Week => {

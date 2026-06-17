@@ -83,3 +83,12 @@ pub struct TextMessage {
     /// 解压后的正文（解码失败为 None）。
     pub text: Option<String>,
 }
+
+/// 判定某条消息是否为「我」发的（全项目共享的发送者归一化口径）。
+///
+/// `self_id` 是归一化后的「我的」发送者 id（loader 已统一为 0=我 / 1=对方，
+/// 或各分片的 Name2Id.rowid）；`sender` 是消息的发送者 id。
+/// `self_id=None` 时一律视为非我（降级：不区分收发）。
+pub fn is_self(self_id: Option<i64>, sender: i64) -> bool {
+    self_id.is_some_and(|me| me == sender)
+}

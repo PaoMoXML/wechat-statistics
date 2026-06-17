@@ -23,7 +23,7 @@ pub struct WordFreq {
 
 /// 计算高频词。`top_n` 控制每组返回多少个；`self_rowid` 给定时才拆分我/对方。
 pub fn word_freq(texts: &[TextMessage], self_rowid: Option<i64>, top_n: usize) -> WordFreq {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
     let jb = jieba();
     let stop = stopwords();
 
@@ -54,7 +54,7 @@ pub fn word_freq(texts: &[TextMessage], self_rowid: Option<i64>, top_n: usize) -
 
 fn top(map: &HashMap<String, i64>, n: usize) -> Vec<(String, i64)> {
     let mut v: Vec<(String, i64)> = map.iter().map(|(k, c)| (k.clone(), *c)).collect();
-    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    crate::fmt::sort_by_value_desc(&mut v);
     v.truncate(n);
     v
 }
@@ -66,7 +66,7 @@ pub fn signature_words(
     self_rowid: Option<i64>,
     top_n: usize,
 ) -> (Vec<(String, i64)>, Vec<(String, i64)>) {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
     let jb = jieba();
     let stop = stopwords();
     let mut mine: HashMap<String, i64> = HashMap::new();

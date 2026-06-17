@@ -3,7 +3,7 @@
 //! 全部基于已读出的 `MessageFact`(时序) + `TextMessage`(解压正文) + self_rowid，
 //! 不依赖数据库、不依赖 couple（避免循环引用）。纯计算、可单测。
 
-use chrono::{DateTime, Local, TimeZone, Timelike};
+use chrono::Timelike;
 use serde::Serialize;
 
 use crate::model::{MessageFact, TextMessage};
@@ -166,7 +166,7 @@ fn firsts(facts: &[MessageFact], texts: &[TextMessage], self_rowid: Option<i64>)
     for tm in texts {
         if let Some(ref text) = tm.text {
             if LOVE_WORDS.iter().any(|w| text.contains(w)) {
-                let snip = snippet(text, 24);
+                let snip = crate::fmt::truncate(text, 24);
                 first_love = Some((tm.create_time, tm.sender_id, snip));
                 break;
             }
@@ -175,7 +175,7 @@ fn firsts(facts: &[MessageFact], texts: &[TextMessage], self_rowid: Option<i64>)
 
     let mk = |label: &str, hit: Option<(i64, i64)>| First {
         label: label.into(),
-        when: hit.map(|(t, _)| fmt_day(t)),
+        when: hit.map(|(t, _)| crate::fmt::fmt_date(t)),
         who: hit.and_then(|(_, s)| who(s)),
         snippet: None,
     };
@@ -188,7 +188,7 @@ fn firsts(facts: &[MessageFact], texts: &[TextMessage], self_rowid: Option<i64>)
     ];
     out.push(First {
         label: "💜 第一句「爱你/想你」".into(),
-        when: first_love.as_ref().map(|(t, _, _)| fmt_day(*t)),
+        when: first_love.as_ref().map(|(t, _, _)| crate::fmt::fmt_date(*t)),
         who: first_love.as_ref().and_then(|(_, s, _)| who(*s)),
         snippet: first_love.map(|(_, _, s)| s),
     });
@@ -234,13 +234,13 @@ fn relation_score(sc: &ScoreInputs) -> RelationScore {
 
 // —— 深夜 emo ——
 fn late_emo(texts: &[TextMessage], self_rowid: Option<i64>) -> LateEmo {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
     let mut my_count = 0i64;
     let mut other_count = 0i64;
     let mut longest: Option<EmoMsg> = None;
     for tm in texts {
         let Some(ref text) = tm.text else { continue };
-        let Some(dt) = to_local(tm.create_time) else { continue };
+        let Some(dt) = crate::fmt::local_dt(tm.create_time) else { continue };
         if dt.hour() > 4 {
             continue;
         }
@@ -254,8 +254,8 @@ fn late_emo(texts: &[TextMessage], self_rowid: Option<i64>) -> LateEmo {
             longest = Some(EmoMsg {
                 chars,
                 is_self: mine,
-                when: fmt_day(tm.create_time),
-                snippet: snippet(text, 40),
+                when: crate::fmt::fmt_date(tm.create_time),
+                snippet: crate::fmt::truncate(text, 40),
             });
         }
     }
@@ -264,11 +264,11 @@ fn late_emo(texts: &[TextMessage], self_rowid: Option<i64>) -> LateEmo {
 
 // —— 聊天生物钟 ——
 fn biorhythm(facts: &[MessageFact], self_rowid: Option<i64>) -> Biorhythm {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
     let mut me = [0i64; 24];
     let mut them = [0i64; 24];
     for f in facts {
-        let Some(dt) = to_local(f.create_time) else { continue };
+        let Some(dt) = crate::fmt::local_dt(f.create_time) else { continue };
         let h = dt.hour() as usize;
         if h < 24 {
             if is_self(f.sender_id) { me[h] += 1; } else { them[h] += 1; }
@@ -279,7 +279,7 @@ fn biorhythm(facts: &[MessageFact], self_rowid: Option<i64>) -> Biorhythm {
 
 // —— 谁先消失 / 冷场 ——
 fn ending(facts: &[MessageFact], self_rowid: Option<i64>) -> Ending {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
     let mut my_last_word = 0i64;
     let mut other_last_word = 0i64;
     let mut my_left = 0i64;
@@ -342,12 +342,12 @@ fn rally(facts: &[MessageFact]) -> Rally {
         (Some(a), Some(b)) => ((b - a) / 60).max(0),
         _ => 0,
     };
-    Rally { max_len: best_len, when: best_start.map(fmt_day), duration_min }
+    Rally { max_len: best_len, when: best_start.map(crate::fmt::fmt_date), duration_min }
 }
 
 // —— 哈哈指数 ——
 fn haha(texts: &[TextMessage], self_rowid: Option<i64>) -> Haha {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
     let mut me = [0i64; 5];
     let mut them = [0i64; 5];
     for tm in texts {
@@ -386,7 +386,7 @@ fn bucket_idx(run: usize) -> usize {
 
 // —— 敷衍指数 ——
 fn perfunctory(texts: &[TextMessage], self_rowid: Option<i64>) -> Perfunctory {
-    let is_self = |s: i64| self_rowid.map_or(false, |me| s == me);
+    let is_self = |s: i64| crate::model::is_self(self_rowid, s);
     const SET: &[&str] = &["嗯", "哦", "噢", "额", "呃", "嗯嗯", "哦哦", "好", "好的", "嗯好", "嗯.", "哦."];
     let mut my = 0i64;
     let mut other = 0i64;
@@ -398,22 +398,6 @@ fn perfunctory(texts: &[TextMessage], self_rowid: Option<i64>) -> Perfunctory {
         }
     }
     Perfunctory { my_count: my, other_count: other }
-}
-
-// —— 小工具 ——
-fn to_local(secs: i64) -> Option<DateTime<Local>> {
-    Local.timestamp_opt(secs, 0).single()
-}
-fn fmt_day(secs: i64) -> String {
-    to_local(secs).map(|dt| dt.format("%Y-%m-%d").to_string()).unwrap_or_default()
-}
-fn snippet(text: &str, max_chars: usize) -> String {
-    let n = text.chars().count();
-    if n <= max_chars {
-        return text.chars().collect();
-    }
-    let head: String = text.chars().take(max_chars).collect();
-    format!("{head}…")
 }
 
 #[cfg(test)]
